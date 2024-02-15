@@ -202,11 +202,14 @@ task regular_plink_gwas {
 task sample_betas {
 
   input {
-
+    File original_betas # one value per line, corresponding to each variant
+    Float sigma
+    Int num_samples
+    Int n_replicates
   }
 
   output {
-
+    File new_betas # tab delimited, n_replicates tab
   }
 
   command <<<
@@ -220,10 +223,32 @@ task sample_betas {
   }
 }
 
+#task sample_ys {
+#
+#  input {
+#    File phenotypes # one value per line, corresponding to each sample
+#    Float sigma
+#  }
+#
+#  output {
+#    File new_phenotypes
+#  }
+#
+#  command <<<
+#
+#  >>>
+#
+#  runtime {
+#    docker: "quay.io/thedevilinthedetails/work/"
+#    dx_timeout:
+#    memory:
+#  }
+#}
+
 task ld_with_covars {
 
   input {
-
+    Float sigma
   }
 
   output {
