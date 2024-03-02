@@ -17,56 +17,60 @@ struct pfiles {
   File pvar
 }
 
-task finemap {
+# sample files described in tasks in this file are
+# one sample per line, no header
 
-  input {
-    
-  }
-
-  output {
-
-  }
-
-  command <<<
-
-  >>>
-
-  runtime {
-    docker: "quay.io/thedevilinthedetails/work/finemap:v1.4.2"
-    dx_timeout:
-    memory:
-  }
-}
-
-task susie {
-
-  input {
-
-  }
-
-  output {
-
-  }
-
-  command <<<
-
-  >>>
-
-  runtime {
-    docker: "quay.io/thedevilinthedetails/work/"
-    dx_timeout:
-    memory:
-  }
-}
+#task finemap {
+#
+#  input {
+#    
+#  }
+#
+#  output {
+#
+#  }
+#
+#  command <<<
+#
+#  >>>
+#
+#  runtime {
+#    docker: "quay.io/thedevilinthedetails/work/finemap:v1.4.2"
+#    dx_timeout:
+#    memory:
+#  }
+#}
+#
+#task susie {
+#
+#  input {
+#
+#  }
+#
+#  output {
+#
+#  }
+#
+#  command <<<
+#
+#  >>>
+#
+#  runtime {
+#    docker: "quay.io/thedevilinthedetails/work/"
+#    dx_timeout:
+#    memory:
+#  }
+#}
 
 task ldstore {
+
+  # can't get this to run - it won't match the variants I'm writing the z file to those
+  # its loading from the bgen but doesn't say why.
 
   input {
     bgen input_bgen
     File mfi
-    Int chrom
-    Int start
-    Int end
+    region bounds # need to make this optional
     Int n_samples
 
     File? sample_file # one sample ID per line, no header?
@@ -79,19 +83,20 @@ task ldstore {
   command <<<
     # write z file
     {
-      printf "rsid\tchromosome\tposition\tallele1\tallele2\n" ;
-      awk 'if (($3 >= ~{start}) && ($3 <= ~{end})) { print $2 "\t" ~{chrom} "\t" $3 "\t" $4 "\t" $5 }' ~{mfi}
+      printf "rsid chromosome position allele1 allele2\n" ;
+      awk '{ if (($3 >= ~{bounds.start}) && ($3 <= ~{bounds.end})) { print $2 " " ~{bounds.chrom} " " $3 " " $4 " " $5 } }' ~{mfi}
     } > file.z
 
-    echo "z;bgen;bgi;ld;n_samples~{if defined(sample_file) then ";incl" else ""}
-    file.z;~{input_bgen.bgen};{input_bgen}.index;ld;~{n_samples}~{";" + sample_file}" > master
+    ~{if defined(sample_file) then "ln ~{sample_file} sample" else "" }
+    ~{if defined(sample_file) then "ln ~{sample_file} incl" else "" }
+    echo "z;bgen;bgi;ld;n_samples~{if defined(sample_file) then ";sample;incl" else ""}
+    file.z;~{input_bgen.bgen};~{input_bgen.index};ld;~{n_samples}~{if defined(sample_file) then ";sample;incl" else ""}" > master
 
     ldstore \
       --write-text \
       --read-only-bgen \
       --in-files master \
-      --memory 55 \
-      --n-threads 28 \
+      --n-threads 28
   >>>
 
   runtime {
@@ -103,10 +108,15 @@ task ldstore {
 }
 
 task plink_ld {
+  # confirmed that this returns correct values: 2024/03/01
+  # using bgen_reader to read instead and then np.corrcoef produces 0.00356942
+  # for chr1 first and second vars instead of 0.00358023 from plink
+  # so there's some precision difference one of these somewhere,
+  # but no such difference for first and third vars with corr 0.227007
 
   input {
     pfiles input_pfiles
-    region? range
+    region? bounds
 
     File? sample_file
   }
@@ -116,51 +126,52 @@ task plink_ld {
   }
 
   command <<<
-    ~{if is_defined(range) then "printf 'chr~{range.chrom}\t~{range.start}\t~{range.end + 1}\n' > region.bed" else ""}
+    ~{if defined(bounds) then "printf 'chr~{select_first([bounds]).chrom}\\t~{select_first([bounds]).start}\\t~{select_first([bounds]).end + 1}\\n' > region.bed" else ""}
+    ~{if defined(sample_file) then "{ printf 'FID\\tIID\\n' ; awk '{ print $1 \"\\t\" $1 }' ~{sample_file} ; } > plink.sample" else "" }
 
     plink2 \
       --pfile $(echo '~{input_pfiles.pgen}' | sed -e 's/\.pgen$//') \
-      ~{if is_defined(range) then "--extract bed1 region.bed \
-      ~{"--keep " + sample_file} \
+      ~{if defined(bounds) then "--extract bed1 region.bed" else ""} \
+      ~{if defined(sample_file) then "--keep plink.sample" else ""} \
       --r-unphased square ref-based \
       --memory 55000 \
       --threads 28
   >>>
 
   runtime {
-    docker: "quay.io/thedevilinthedetails/work/plink:v2.00a5LM_AVX2_Intel_23_Sep_2023"
+    docker: "quay.io/thedevilinthedetails/work/plink:v2.00a6LM_AVX2_Intel_5_Feb_2024"
     dx_timeout: "48h"
     memory: "56GB"
     cpus: 28
   }
 }
 
-task ld_with_covars {
-
-  input {
-
-  }
-
-  output {
-
-  }
-
-  command <<<
-
-  >>>
-
-  runtime {
-    docker: "quay.io/thedevilinthedetails/work/"
-    dx_timeout:
-    memory:
-  }
-}
+#task ld_with_covars {
+#
+#  input {
+#
+#  }
+#
+#  output {
+#
+#  }
+#
+#  command <<<
+#
+#  >>>
+#
+#  runtime {
+#    docker: "quay.io/thedevilinthedetails/work/"
+#    dx_timeout:
+#    memory:
+#  }
+#}
 
 task regular_plink_gwas {
 
   input {
     pfiles input_pfiles
-    region? range
+    region? bounds
     String phenotype_name
 
     File pheno_covar_file
@@ -175,17 +186,18 @@ task regular_plink_gwas {
   }
 
   command <<<
-    ~{if is_defined(range) then "printf 'chr~{range.chrom}\t~{range.start}\t~{range.end + 1}\n' > region.bed" else ""}
+    ~{if defined(bounds) then "printf 'chr~{select_first([bounds]).chrom}\\t~{select_first([bounds]).start}\\t~{select_first([bounds]).end + 1}\\n' > region.bed" else ""}
+    ~{if defined(sample_file) then "{ printf 'FID\\tIID\\n' ; awk '{ print $1 \"\\t\" $1 }' ~{sample_file} ; } > plink.sample" else "" }
 
     plink2 \
-      ~{"--keep " + sample_file} \
+      ~{if defined(sample_file) then "--keep plink.sample" else ""} \
       --no-psam-pheno \
       --pheno ~{pheno_covar_file} \
       --pheno-name ~{phenotype_name} \
       --pfile $(echo '~{input_pfiles.pgen}' | sed -e 's/\.pgen$//') \
-      ~{if is_defined(range) then "--extract bed1 region.bed" else ""} \
+      ~{if defined(bounds) then "--extract bed1 region.bed" else ""} \
       --mac 20 \
-      --glm omit-ref pheno-ids hide-covar cols=-test,-nobs \ # TODO add columns
+      --glm omit-ref pheno-ids hide-covar cols=+machr2,-test,-nobs \
       --memory 55000 \
       --threads 28 \
       > plink.stdout 2> plink.stderr
@@ -202,67 +214,84 @@ task regular_plink_gwas {
 task sample_betas {
 
   input {
+    String script_dir
+    File script = "~{script_dir}/scripts/sample_betas.py"
+
     File original_betas # one value per line, corresponding to each variant
+    File ld # whitespace delimited file of square float array written as text
     Float sigma
     Int num_samples
     Int n_replicates
   }
 
   output {
-    File new_betas # tab delimited, n_replicates tab
+    File new_betas = "replicate_betas.tab" # len(original_betas) x n_replicates
   }
 
   command <<<
-
+    python ~{script} ~{original_betas} ~{ld}  ~{sigma} ~{num_samples} ~{n_replicates}
   >>>
 
   runtime {
-    docker: "quay.io/thedevilinthedetails/work/"
-    dx_timeout:
-    memory:
+    docker: "quay.io/thedevilinthedetails/work/numpy:v1.26.4"
+    dx_timeout: "2h"
+    memory: "10GB"
   }
 }
 
-#task sample_ys {
-#
-#  input {
-#    File phenotypes # one value per line, corresponding to each sample
-#    Float sigma
-#  }
-#
-#  output {
-#    File new_phenotypes
-#  }
-#
-#  command <<<
-#
-#  >>>
-#
-#  runtime {
-#    docker: "quay.io/thedevilinthedetails/work/"
-#    dx_timeout:
-#    memory:
-#  }
-#}
-
-task ld_with_covars {
+task get_training_samples {
 
   input {
-    Float sigma
+    File samples
+    Int num_samples
   }
 
   output {
-
+    File training_samples = "training.sample" 
   }
 
   command <<<
-
+    head -n ~{num_samples} ~{samples} > training.sample
   >>>
 
   runtime {
-    docker: "quay.io/thedevilinthedetails/work/"
-    dx_timeout:
-    memory:
+    docker: "ubuntu:jammy-20240212"
+    dx_timeout: "30m"
+    memory: "2GB"
   }
 }
 
+task get_validation_subsample_replicates {
+  
+  input {
+    File samples
+    Int num_samples
+    Int replicate 
+  }
+
+  output {
+    File replicate_samples = "replicate_~{replicate}.sample"
+  }
+
+  command <<<
+    # from https://www.gnu.org/software/coreutils/manual/html_node/Random-sources.html
+    get_seeded_random()
+    {
+      seed="$1"
+      openssl enc -aes-256-ctr -pass pass:"$seed" -nosalt \
+        </dev/zero 2>/dev/null
+    }
+
+    # cut off the first num_samples samples from the file which will have been used for training, then select randomly from the rest
+    shuf -n ~{num_samples} \
+      --random-source=<(get_seeded_random ~{replicate}) \
+      <(tail -n +~{num_samples + 1} ~{samples}) \
+      > replicate_~{replicate}.sample
+  >>>
+
+  runtime {
+    docker: "ubuntu:jammy-20240212"
+    dx_timeout: "30m"
+    memory: "2GB"
+  }
+}
