@@ -1,0 +1,10 @@
+{
+	"prep_samples_and_phenotype.project_ukb_script_dir": "scripts/ukb_prep",
+	"prep_samples_and_phenotype.old_ukb_script_dir": "../ukbiobank",
+	"prep_samples_and_phenotype.phenotype_name": "platelet_count",
+	"prep_samples_and_phenotype.is_binary": false,
+	"prep_samples_and_phenotype.phenotype_id": 30080,
+	"prep_samples_and_phenotype.categorical_covariate_names": ["platelet_count_device_id"],
+	"prep_samples_and_phenotype.categorical_covariate_ids": ["30083"]
+}
+	

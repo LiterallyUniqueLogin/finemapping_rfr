@@ -62,51 +62,6 @@ struct pfiles {
 #  }
 #}
 
-task ldstore {
-
-  # can't get this to run - it won't match the variants I'm writing the z file to those
-  # its loading from the bgen but doesn't say why.
-
-  input {
-    bgen input_bgen
-    File mfi
-    region bounds # need to make this optional
-    Int n_samples
-
-    File? sample_file # one sample ID per line, no header?
-  }
-
-  output {
-    File ld = "ld"
-  }
-
-  command <<<
-    # write z file
-    {
-      printf "rsid chromosome position allele1 allele2\n" ;
-      awk '{ if (($3 >= ~{bounds.start}) && ($3 <= ~{bounds.end})) { print $2 " " ~{bounds.chrom} " " $3 " " $4 " " $5 } }' ~{mfi}
-    } > file.z
-
-    ~{if defined(sample_file) then "ln ~{sample_file} sample" else "" }
-    ~{if defined(sample_file) then "ln ~{sample_file} incl" else "" }
-    echo "z;bgen;bgi;ld;n_samples~{if defined(sample_file) then ";sample;incl" else ""}
-    file.z;~{input_bgen.bgen};~{input_bgen.index};ld;~{n_samples}~{if defined(sample_file) then ";sample;incl" else ""}" > master
-
-    ldstore \
-      --write-text \
-      --read-only-bgen \
-      --in-files master \
-      --n-threads 28
-  >>>
-
-  runtime {
-    docker: "quay.io/thedevilinthedetails/work/ldstore:v2.0"
-    dx_timeout: "48h"
-    memory: "56GB"
-    cpus: 28
-  }
-}
-
 task plink_ld {
   # confirmed that this returns correct values: 2024/03/01
   # using bgen_reader to read instead and then np.corrcoef produces 0.00356942
@@ -123,6 +78,7 @@ task plink_ld {
 
   output {
     File ld = "plink2.unphased.vcor1"
+    File log = "plink2.log"
   }
 
   command <<<

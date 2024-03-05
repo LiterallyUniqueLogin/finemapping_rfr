@@ -27,15 +27,6 @@ workflow test_ld {
     num_samples = n_samples
   }
 
-  call tasks.ldstore { input : 
-    input_bgen = chr1_bgen,
-    mfi = mfi,
-    bounds = bounds,
-    n_samples = n_samples,
-
-    sample_file = get_training_samples.training_samples
-  }
-
   call tasks.plink_ld { input :
     input_pfiles = chr1_pfiles,
     bounds = bounds,

@@ -1,3 +1,4 @@
 *.swp
 cromwell-executions
 cromwell-workflow-logs
+.mypy_cache
