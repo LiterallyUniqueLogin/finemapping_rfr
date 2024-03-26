@@ -126,7 +126,29 @@ task cut_samples_from_first_column {
   >>>
 
   runtime {
-    docker: "quay.io/thedevilinthedetails/work/python_data:v1.0"
+    docker: "ubuntu:jammy-20240212"
+    shortTask: true
+    dx_timeout: "1h"
+    memory: "2GB"
+  }
+}
+
+task remove_header {
+  input {
+    File f
+    String outname
+  }
+
+  output {
+    File out = "~{outname}"
+  }
+
+  command <<<
+    tail -n +2 ~{f} > ~{outname}
+  >>>
+
+  runtime {
+    docker: "ubuntu:jammy-20240212"
     shortTask: true
     dx_timeout: "1h"
     memory: "2GB"
@@ -135,7 +157,7 @@ task cut_samples_from_first_column {
 
 # --------------- Begin workflow ---------------------
 
-workflow prep_samples_and_phenotype {
+workflow prep_ukb_inputs {
 
   input {
     String project_ukb_script_dir
@@ -150,8 +172,6 @@ workflow prep_samples_and_phenotype {
     Array[Int] categorical_covariate_ids = []
 
     File? premade_pheno_df # first col ID, second pheno, remaining are covars
-
-    Boolean transform = true
 
     # If specified, must contain all samples of all ethnicities that you want included
     # (so any samples not included will be omitted)
@@ -168,11 +188,6 @@ workflow prep_samples_and_phenotype {
   call expanse_tasks.extract_field as white_brits { input:
     script_dir = old_ukb_script_dir,
     id = 22006
-  }
-
-  call expanse_tasks.extract_field as ethnicity_self_report { input :
-    script_dir = old_ukb_script_dir,
-    id = 21000
   }
 
   call expanse_tasks.extract_field as sex_aneuploidy { input:
@@ -315,17 +330,10 @@ workflow prep_samples_and_phenotype {
     samples = samples_for_phenotype_,
     outname = "unrelated_qced_white_brits_~{phenotype_name}"
   }
-
-  if (transform && !is_binary) {
-    call create_numpy_from_df as unrelated_npy { input :
-      df = subsetted_pheno_unrelated.df
-    }
-
-    call gwas_tasks.transform_trait_values { input :
-      script_dir = old_ukb_script_dir,
-      pheno_data = unrelated_npy.npy,
-      prefix = "rin_unrelated_qced_white_brits_~{phenotype_name}"
-    }
+  
+  call remove_header as samples_for_phenotype_no_header_ { input:
+    f = samples_for_phenotype_,
+    outname =  "unrelated_qced_white_brits_~{phenotype_name}_no_header"
   }
 
   output {
@@ -333,8 +341,7 @@ workflow prep_samples_and_phenotype {
     File unrelated_pheno_df = subsetted_pheno_unrelated.df # unrelated
 
     # sample lists subset to those with the specified phenotype
-    File samples_for_phenotype = samples_for_phenotype_ # unrelated, qced and takes into account subpop if specified
-
-    File? transformed_trait_values_npy = transform_trait_values.data
+    File samples_for_phenotype_with_header = samples_for_phenotype_ # unrelated, qced and takes into account subpop if specified
+    File samples_for_phenotype_no_header = samples_for_phenotype_no_header_.out # unrelated, qced and takes into account subpop if specified
   }
 }

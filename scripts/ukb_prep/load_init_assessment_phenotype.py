@@ -44,7 +44,7 @@ df = pl.read_csv(
         separator = '\t',
         new_columns = ['id', args.phenotype_name]
     ).select([
-       pl.col('id'), pl.col(args.phenotype_name) 
+       pl.col('id'), pl.col(args.phenotype_name)
     ]),
     how = 'inner',
     on = 'id'

@@ -15,11 +15,13 @@ workflow test_ld {
     "pvar": "../ukbiobank/array_imputed/pfile_converted/chr1.pvar",
   }
   File samples = "data/platelet_count/combined_unrelated.sample"
-  Int n_samples = 50000
+  #Int n_samples = 50000
+  Int n_samples = 5000
   region bounds = {
     "chrom": 1,
     "start": 0,
-    "end": 136062 #1000 variants in
+    #"end": 136062 #1000 variants in
+    "end": 898976 #10000 variants in
   }
 
   call tasks.get_training_samples { input : 

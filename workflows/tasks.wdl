@@ -17,6 +17,45 @@ struct pfiles {
   File pvar
 }
 
+## helper task
+
+task concatenate_tsvs {
+  input {
+    # this can be larger than the max number of arguments for a command on the command line,
+		# but cannot be too long for a string variable or an array in bash
+    Array[File]+ tsvs
+    String prefix = "out"
+  }
+
+  output {
+    File tsv = "~{prefix}.tab"
+  }
+
+  command <<<
+    bash -c '
+      tsvs=(~{sep=" " tsvs})
+      if (( $(for (( i=0; i<${#tsvs[@]}; i++ )); do
+        head -1 "${tsvs[$i]}"
+      done | uniq -c | wc -l) != 1 )) ; then
+        echo "Different headers" 2>&1
+        exit 1
+      fi
+
+      head -1 ~{tsvs[0]} > ~{prefix}.tab
+      for (( i=0; i<${#tsvs[@]}; i++ )); do
+        tail -n +2 "${tsvs[$i]}" >> ~{prefix}.tab
+      done
+    '
+  >>>
+
+  runtime {
+    docker: "ubuntu:jammy-20240212"
+    dx_timeout: "4h"
+    memory: "2GB"
+  }
+}
+
+
 # sample files described in tasks in this file are
 # one sample per line, no header
 
@@ -40,26 +79,88 @@ struct pfiles {
 #    memory:
 #  }
 #}
-#
-#task susie {
-#
+
+task susie {
+
+  input {
+    String script_dir
+    File script = "~{script_dir}/sum_stats_susie.r"
+
+    File effect_sizes
+    File effect_standard_errors
+    File correlation_matrix
+    Int n_samples
+    Float phenotype_variance
+    Int L
+
+    String prefix = ''
+  }
+
+  command <<<
+    Rscript ~{script} \
+      ~{effect_sizes} \
+      ~{effect_standard_errors} \
+      ~{correlation_matrix} \
+      ~{n_samples} \
+      ~{phenotype_variance} \
+      ~{L}
+  >>>
+
+  output {
+    File lbf = "~{prefix}lbf.tab"
+    File lbf_variable = "~{prefix}lbf_variable.tab"
+    File sigma2 = "~{prefix}sigma2.txt"
+    File V = "~{prefix}V.tab"
+    File converged = "~{prefix}converged.txt"
+    File lfsr = "~{prefix}lfsr.tab"
+    File requested_coverage = "~{prefix}requested_coverage.txt"
+    File alpha = "~{prefix}alpha.tab"
+    File colnames = "~{prefix}colnames.txt"
+    Array[File] CSs = glob("~{prefix}cs*.txt")
+  }
+
+  runtime {
+    docker: "quay.io/thedevilinthedetails/work/susie:v0.12.35"
+    dx_timeout: '4h'
+    memory: '10GB'
+  }
+}
+
+#task plink_ld_many_regions {
 #  input {
+#    pfiles input_pfiles
+#    Array[region] bounds
 #
+#    File? sample_file
 #  }
 #
 #  output {
-#
+#    File ld = "plink2.unphased.vcor1"
+#    File log = "plink2.log"
 #  }
 #
 #  command <<<
+#    ~{if defined(bounds) then "printf '~{select_first([bounds]).chrom}\\t~{select_first([bounds]).start}\\t~{select_first([bounds]).end + 1}\\n' > region.bed" else ""}
+#    ~{if defined(sample_file) then "{ printf 'FID\\tIID\\n' ; awk '{ print $1 \"\\t\" $1 }' ~{sample_file} ; } > plink.sample" else "" }
 #
+#    plink2 \
+#      --pfile $(echo '~{input_pfiles.pgen}' | sed -e 's/\.pgen$//') \
+#      ~{if defined(bounds) then "--extract bed1 region.bed" else ""} \
+#      ~{if defined(sample_file) then "--keep plink.sample" else ""} \
+#      --r-unphased square ref-based \
+#      --memory 55000 \
+#      --threads 28
 #  >>>
 #
 #  runtime {
-#    docker: "quay.io/thedevilinthedetails/work/"
-#    dx_timeout:
-#    memory:
+#    docker: "quay.io/thedevilinthedetails/work/plink:v2.00a6LM_AVX2_Intel_5_Feb_2024"
+#    # with 50k samples takes ~12sec for 1k variants, ~15m for 10k variants
+#    # with 5k samples takes ~2sec for 1k variants, ~2m8s for 10k variants
+#    dx_timeout: "48h"
+#    memory: "56GB"
+#    cpus: 28
 #  }
+#
 #}
 
 task plink_ld {
@@ -74,29 +175,43 @@ task plink_ld {
     region? bounds
 
     File? sample_file
+    String prefix = 'plink2'
   }
 
   output {
-    File ld = "plink2.unphased.vcor1"
-    File log = "plink2.log"
+    File ld = "~{prefix}.unphased.vcor1"
+    File freq = "~{prefix}.afreq"
+    File vars = "~{prefix}.unphased.vcor1.vars"
+    File log = "~{prefix}.log"
   }
 
   command <<<
-    ~{if defined(bounds) then "printf 'chr~{select_first([bounds]).chrom}\\t~{select_first([bounds]).start}\\t~{select_first([bounds]).end + 1}\\n' > region.bed" else ""}
+    ~{if defined(bounds) then "printf '~{select_first([bounds]).chrom}\\t~{select_first([bounds]).start}\\t~{select_first([bounds]).end + 1}\\n' > region.bed" else ""}
     ~{if defined(sample_file) then "{ printf 'FID\\tIID\\n' ; awk '{ print $1 \"\\t\" $1 }' ~{sample_file} ; } > plink.sample" else "" }
 
     plink2 \
       --pfile $(echo '~{input_pfiles.pgen}' | sed -e 's/\.pgen$//') \
       ~{if defined(bounds) then "--extract bed1 region.bed" else ""} \
+      --maf 0.0005 \
       ~{if defined(sample_file) then "--keep plink.sample" else ""} \
       --r-unphased square ref-based \
       --memory 55000 \
-      --threads 28
+      --threads 28 \
+      --freq \
+      --out ~{prefix}
   >>>
+
+  ## --maf 0.0002 culls to about 1/3 of the variants (MAC 20 for 50k individuals)
+  ## --maf 0.005 culls to between 1/4-1/5 of the variants (MAC 50 for 50k individuals)
+  ## --maf 0.001 culls to about 1/6 of the variants (MAC 100 for 50k individuals)
+
 
   runtime {
     docker: "quay.io/thedevilinthedetails/work/plink:v2.00a6LM_AVX2_Intel_5_Feb_2024"
-    dx_timeout: "48h"
+    # with 50k samples takes ~12sec for 1k variants, ~15m for 10k variants - got to 2 min in a later run, unclear why
+    # with 5k samples takes ~2sec for 1k variants, ~2m8s for 10k variants
+    # costs $0.15 for a genome-wide run for platelet count at an MAF threshold corresponding to MAC 50
+    dx_timeout: "8h"
     memory: "56GB"
     cpus: 28
   }
@@ -123,7 +238,7 @@ task plink_ld {
 #  }
 #}
 
-task regular_plink_gwas {
+task plink_gwas {
 
   input {
     pfiles input_pfiles
@@ -131,39 +246,54 @@ task regular_plink_gwas {
     String phenotype_name
 
     File pheno_covar_file
+    Boolean quantile_normalize
 
     File? sample_file
+
+    String prefix = "plink2"
   }
 
   output {
-    File gwas = "plink2.~{phenotype_name}.glm.linear"
-    File stdout_log = "plink.stdout"
-    File stderr_log = "plink.stderr"
+    File gwas = "~{prefix}.~{phenotype_name}.glm.linear"
+    File stdout_log = "~{prefix}.stdout"
+    File stderr_log = "~{prefix}.stderr"
   }
 
   command <<<
-    ~{if defined(bounds) then "printf 'chr~{select_first([bounds]).chrom}\\t~{select_first([bounds]).start}\\t~{select_first([bounds]).end + 1}\\n' > region.bed" else ""}
+    ~{if defined(bounds) then "printf '~{select_first([bounds]).chrom}\\t~{select_first([bounds]).start}\\t~{select_first([bounds]).end + 1}\\n' > region.bed" else ""}
     ~{if defined(sample_file) then "{ printf 'FID\\tIID\\n' ; awk '{ print $1 \"\\t\" $1 }' ~{sample_file} ; } > plink.sample" else "" }
+
+    # replace id column with two identical columns FID and FID
+    {
+      printf "FID\tIID\t" ; head -1 ~{pheno_covar_file} | cut -f 2-
+      paste <(cut -f 1 ~{pheno_covar_file} | tail -n +2) <(tail -n +2 ~{pheno_covar_file})
+    } > plink_formatted_df.tab
 
     plink2 \
       ~{if defined(sample_file) then "--keep plink.sample" else ""} \
       --no-psam-pheno \
-      --pheno ~{pheno_covar_file} \
+      --pheno plink_formatted_df.tab \
       --pheno-name ~{phenotype_name} \
+      --covar-name $(head -1 plink_formatted_df.tab | cut -f 4- ) \
+      --covar-variance-standardize \
+      ~{if quantile_normalize then "--pheno-quantile-normalize" else ""} \
       --pfile $(echo '~{input_pfiles.pgen}' | sed -e 's/\.pgen$//') \
       ~{if defined(bounds) then "--extract bed1 region.bed" else ""} \
-      --mac 20 \
+      --maf 0.0005 \
       --glm omit-ref pheno-ids hide-covar cols=+machr2,-test,-nobs \
       --memory 55000 \
       --threads 28 \
-      > plink.stdout 2> plink.stderr
+      --out ~{prefix} \
+      > ~{prefix}.stdout 2> ~{prefix}.stderr
   >>>
 
   runtime {
     docker: "quay.io/thedevilinthedetails/work/plink:v2.00a5LM_AVX2_Intel_23_Sep_2023"
-    dx_timeout: "48h"
+    dx_timeout: "24h"
     memory: "56GB"
     cpus: 28
+    # costs $0.79 for each run genome-wide with MAC < 20 filter and 50k samples
+    # so would expect the cost to be 3/4.5 that amount with MAF equivalent to MAC < 50 filter, i.e. $0.53
   }
 }
 
@@ -246,7 +376,7 @@ task get_validation_subsample_replicates {
   >>>
 
   runtime {
-    docker: "ubuntu:jammy-20240212"
+    #docker: "ubuntu:jammy-20240212" would need a docker with openssl
     dx_timeout: "30m"
     memory: "2GB"
   }
